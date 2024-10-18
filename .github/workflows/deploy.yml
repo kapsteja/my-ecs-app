@@ -1,0 +1,47 @@
+name: Deploy to ECS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up AWS CLI
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+
+    - name: Log in to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Build and tag Docker image
+      run: |
+        docker build -t my-sample-app ./app
+        docker tag my-sample-app:latest ${{ steps.login-ecr.outputs.registry }}/my-sample-app:latest
+
+    - name: Push Docker image to Amazon ECR
+      run: |
+        docker push ${{ steps.login-ecr.outputs.registry }}/my-sample-app:latest
+
+    - name: Set up Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_version: 1.4.6
+
+    - name: Initialize Terraform
+      working-directory: ./terraform
+      run: terraform init
+
+    - name: Apply Terraform
+      working-directory: ./terraform
+      run: terraform apply -auto-approve
