@@ -25,10 +25,12 @@ jobs:
 
       # Step 3: Terraform Init
       - name: Terraform Init
+        working-directory: ./terraform
         run: terraform init
 
       # Step 4: Terraform Apply
       - name: Terraform Apply
+        working-directory: ./terraform
         id: terraform
         run: terraform apply -auto-approve
 
