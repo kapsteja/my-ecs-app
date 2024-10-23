@@ -1,4 +1,4 @@
-name: Deploy to ECS
+name: Terraform and Deploy to ECS
 
 on:
   push:
@@ -6,42 +6,83 @@ on:
       - main
 
 jobs:
-  deploy:
+  provision-infrastructure:
+    name: Provision Infrastructure with Terraform
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      # Step 1: Checkout the repository
+      - name: Checkout repository
+        uses: actions/checkout@v2
 
-    - name: Set up AWS CLI
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: us-east-1
+      # Step 2: Set up Terraform
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_wrapper: false
 
-    - name: Log in to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v1
+      # Step 3: Terraform Init
+      - name: Terraform Init
+        run: terraform init
 
-    - name: Build and tag Docker image
-      run: |
-        docker build -t my-sample-app ./app
-        docker tag my-sample-app:latest ${{ steps.login-ecr.outputs.registry }}/my-sample-app:latest
+      # Step 4: Terraform Apply
+      - name: Terraform Apply
+        id: terraform
+        run: terraform apply -auto-approve
 
-    - name: Push Docker image to Amazon ECR
-      run: |
-        docker push ${{ steps.login-ecr.outputs.registry }}/my-sample-app:latest
+      # Step 5: Save ECR repository URL and ECS details
+      - name: Get Terraform Outputs
+        id: outputs
+        run: |
+          echo "ECR_REPO_URL=$(terraform output -raw ecr_repository_url)" >> $GITHUB_ENV
+          echo "ECS_CLUSTER_NAME=$(terraform output -raw ecs_cluster_name)" >> $GITHUB_ENV
+          echo "ECS_SERVICE_NAME=$(terraform output -raw ecs_service_name)" >> $GITHUB_ENV
 
-    - name: Set up Terraform
-      uses: hashicorp/setup-terraform@v2
-      with:
-        terraform_version: 1.4.6
+  deploy:
+    name: Build and Deploy to ECS
+    runs-on: ubuntu-latest
+    needs: provision-infrastructure
 
-    - name: Initialize Terraform
-      working-directory: ./terraform
-      run: terraform init
+    steps:
+      # Step 1: Checkout the repository
+      - name: Checkout repository
+        uses: actions/checkout@v2
 
-    - name: Apply Terraform
-      working-directory: ./terraform
-      run: terraform apply -auto-approve
+      # Step 2: Set up Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '14'
+
+      # Step 3: Install dependencies
+      - name: Install dependencies
+        run: npm install
+
+      # Step 4: Build the application
+      - name: Build the application
+        run: npm run build
+
+      # Step 5: Log in to Amazon ECR
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      # Step 6: Build Docker image
+      - name: Build Docker image
+        run: |
+          docker build -t my-app-ecr .
+          docker tag my-app-ecr:latest ${{ env.ECR_REPO_URL }}:latest
+
+      # Step 7: Push Docker image to ECR
+      - name: Push Docker image
+        run: |
+          docker push ${{ env.ECR_REPO_URL }}:latest
+
+      # Step 8: Deploy to ECS
+      - name: Deploy to Amazon ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: my-app-task-def.json
+          service: ${{ env.ECS_SERVICE_NAME }}
+          cluster: ${{ env.ECS_CLUSTER_NAME }}
+          wait-for-service-stability: true
