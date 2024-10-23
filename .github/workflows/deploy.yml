@@ -3,7 +3,9 @@ name: Terraform and Deploy to ECS
 on:
   push:
     branches:
-      - main
+    - main
+    paths:
+    - terraform/**
 
 jobs:
   provision-infrastructure:
